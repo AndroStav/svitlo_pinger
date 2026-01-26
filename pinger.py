@@ -72,7 +72,7 @@ async def info_message(threshold):
         perc = (available / status["total"]) * 100
         
         icon = "💡" if fail_ratio < threshold else "⚠️"
-        status_text = "зі світлом" if fail_ratio < threshold else "БЕЗ СВІТЛА"
+        status_text = "зі світлом" if fail_ratio < threshold else "без світла"
         
         message += f"{icon} **{building}**: {status_text}\n"
         message += f"└ Доступність: {perc:.1f}% ({available} з {status['total']})\n\n"
@@ -107,11 +107,11 @@ async def central_monitor(bot, CHAT_ID, threshold, delay, delay_error):
 
             if fail_ratio >= threshold and not status["alert_sent"]:
                 status["alert_sent"] = True
-                await sendmess(bot, CHAT_ID, f"⚠️ Зникло світло: {building}\n🔴 Доступність: {perc:.1f}% ({available} з {status['total']})\n🕑 {time_now}", delay_error)
+                await sendmess(bot, CHAT_ID, f"⚠️ Світло зникло: {building}\n🔴 Доступність: {perc:.1f}% ({available} з {status['total']})\n🕑 {time_now}", delay_error)
             
             elif fail_ratio < threshold and status["alert_sent"]:
                 status["alert_sent"] = False
-                await sendmess(bot, CHAT_ID, f"💡 Світло з'явилося: {building}\n✅ Доступність: {perc:.1f}% ({available} з {status['total']})\n🕑 {time_now}", delay_error)
+                await sendmess(bot, CHAT_ID, f"💡 Світло з'явилося: {building}\n🟢 Доступність: {perc:.1f}% ({available} з {status['total']})\n🕑 {time_now}", delay_error)
         
         # Оновлення закріпленого повідомлення
         try:
