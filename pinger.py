@@ -56,6 +56,20 @@ async def pinger_worker(ip, building, delay):
 async def central_monitor(bot, CHAT_ID, threshold, delay):
     # Даємо час на перший скан (3 цикли затримки, щоб дані були точними)
     await asyncio.sleep(delay * 3)
+    # Стартове повідомлення зі статусами
+    start_message = "Статус світла на старті:"
+    
+    for building, status in buildings_status.items():
+        fail_ratio = status["down"] / status["total"]
+        if fail_ratio >= threshold:
+                status["alert_sent"] = True
+                start_message += f"\n⚠️ {building} без світла\n        (доступно {status['total'] - status['down']} з {status['total']})"
+            
+        elif fail_ratio < threshold:
+            status["alert_sent"] = False
+            start_message += f"\n💡 {building} зі світлом\n        (доступно {status['total'] - status['down']} з {status['total']})"
+    
+    await sendmess(bot, CHAT_ID, start_message)
     
     while True:
         time = datetime.now().strftime('%H:%M:%S')
@@ -64,7 +78,7 @@ async def central_monitor(bot, CHAT_ID, threshold, delay):
 
             if fail_ratio >= threshold and not status["alert_sent"]:
                 status["alert_sent"] = True
-                await sendmess(bot, CHAT_ID, f"⚠️ Зникло світло: {building}\n🔴 Впало {status['down']} з {status['total']} пристроїв.\n🕑 {time}")
+                await sendmess(bot, CHAT_ID, f"⚠️ Зникло світло: {building}\n🔴 Доступно {status['total'] - status['down']} з {status['total']} пристроїв.\n🕑 {time}")
             
             elif fail_ratio < threshold and status["alert_sent"]:
                 status["alert_sent"] = False
