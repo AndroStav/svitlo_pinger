@@ -1,5 +1,6 @@
 import asyncio, os, telegram, csv, configparser, logging, sys
 from datetime import datetime
+from telegram.error import NetworkError, TimedOut, RetryAfter
 
 # Налаштування логування
 logging.basicConfig(level=logging.INFO, filename="pinger.log", filemode="w", format="%(asctime)s %(levelname)s [%(funcName)s]: %(message)s")
@@ -33,13 +34,21 @@ async def ping(host):
         return await process.wait()
     except: return None
 
-async def sendmess(bot, CHAT_ID, message):
-    try:
-        await bot.send_message(chat_id=CHAT_ID, text=message)
-    except Exception as e:
-        logging.error(f"TG Error: {e}")
+async def sendmess(bot, CHAT_ID, message, delay_error):
+    """Наполеглива відправка повідомлень з обробкою помилок мережі"""
+    while True:
+        try:
+            await bot.send_message(chat_id=CHAT_ID, text=message)
+            return
+        except RetryAfter as e:
+            await asyncio.sleep(e.retry_after)
+        except (NetworkError, TimedOut):
+            logging.warning(f"Мережа недоступна. Повтор через {delay_error} сек...")
+            await asyncio.sleep(delay_error)
+        except Exception as e:
+            logging.error(f"Помилка відправки: {e}")
+            break
 
-# Використовуємо delay для пауз між пінгами
 async def pinger_worker(ip, building, delay):
     while True:
         response = await ping(ip)
@@ -54,48 +63,72 @@ async def pinger_worker(ip, building, delay):
 
 async def info_message(threshold):
     time = datetime.now().strftime('%H:%M:%S')
-    message = f"Статус світла станом на {time}:"
+    message = f"📊 **МОНІТОР СВІТЛА**\nОновлено о: `{time}`\n"
+    message += "—" * 15 + "\n"
     
     for building, status in buildings_status.items():
+        available = status["total"] - status["down"]
         fail_ratio = status["down"] / status["total"]
-        if fail_ratio >= threshold:
-                status["alert_sent"] = True
-                message += f"\n⚠️ {building} без світла\n        (доступно {status['total'] - status['down']} з {status['total']})"
-            
-        elif fail_ratio < threshold:
-            status["alert_sent"] = False
-            message += f"\n💡 {building} зі світлом\n        (доступно {status['total'] - status['down']} з {status['total']})"
+        perc = (available / status["total"]) * 100
+        
+        icon = "💡" if fail_ratio < threshold else "⚠️"
+        status_text = "зі світлом" if fail_ratio < threshold else "БЕЗ СВІТЛА"
+        
+        message += f"{icon} **{building}**: {status_text}\n"
+        message += f"└ Доступність: {perc:.1f}% ({available} з {status['total']})\n\n"
+    
     return message
 
-# Використовуємо delay для частоти перевірки стану будинків
-async def central_monitor(bot, CHAT_ID, threshold, delay):
-    # Даємо час на перший скан (3 цикли затримки, щоб дані були точними)
+async def central_monitor(bot, CHAT_ID, threshold, delay, delay_error):
     await asyncio.sleep(delay * 3)
-    # Стартове повідомлення зі статусами
-    start_message = await info_message(threshold)
-    await sendmess(bot, CHAT_ID, start_message)
     
+    for building, status in buildings_status.items():
+        status["alert_sent"] = (status["down"] / status["total"] >= threshold)
+    
+    # Створення закріпленого повідомлення з очікуванням мережі
+    main_msg = None
+    while main_msg is None:
+        try:
+            report_text = await info_message(threshold)
+            main_msg = await bot.send_message(chat_id=CHAT_ID, text=report_text, parse_mode="Markdown")
+            await bot.pin_chat_message(chat_id=CHAT_ID, message_id=main_msg.message_id)
+        except (NetworkError, TimedOut):
+            logging.warning(f"Немає інету для закріпу. Чекаю {delay_error} сек...")
+            await asyncio.sleep(delay_error)
+
     while True:
-        time = datetime.now().strftime('%H:%M:%S')
+        await asyncio.sleep(delay)
+        time_now = datetime.now().strftime('%H:%M:%S')
+        
         for building, status in buildings_status.items():
             fail_ratio = status["down"] / status["total"]
+            available = status["total"] - status["down"]
+            perc = (available / status["total"]) * 100
 
             if fail_ratio >= threshold and not status["alert_sent"]:
                 status["alert_sent"] = True
-                await sendmess(bot, CHAT_ID, f"⚠️ Зникло світло: {building}\n🔴 Доступно {status['total'] - status['down']} з {status['total']} пристроїв.\n🕑 {time}")
+                await sendmess(bot, CHAT_ID, f"⚠️ Зникло світло: {building}\n🔴 Доступність: {perc:.1f}% ({available} з {status['total']})\n🕑 {time_now}", delay_error)
             
             elif fail_ratio < threshold and status["alert_sent"]:
                 status["alert_sent"] = False
-                await sendmess(bot, CHAT_ID, f"💡 Світло з'явилося: {building}\n✅ Доступно {status['total'] - status['down']} з {status['total']} пристроїв.\n🕑 {time}")
+                await sendmess(bot, CHAT_ID, f"💡 Світло з'явилося: {building}\n✅ Доступність: {perc:.1f}% ({available} з {status['total']})\n🕑 {time_now}", delay_error)
         
-        await asyncio.sleep(delay)
+        # Оновлення закріпленого повідомлення
+        try:
+            new_report = await info_message(threshold)
+            await bot.edit_message_text(chat_id=CHAT_ID, message_id=main_msg.message_id, text=new_report, parse_mode="Markdown")
+        except (NetworkError, TimedOut):
+            pass # Просто чекаємо наступного циклу
+        except telegram.error.BadRequest as e:
+            if "Message is not modified" not in str(e):
+                logging.error(f"Помилка оновлення: {e}")
 
 async def main():
-    config = configparser.RawConfigParser() # Використовуємо для читання налаштувань
+    config = configparser.RawConfigParser()
     config.read("config.ini")
     
-    # Зчитуємо DELAY з файлу налаштувань
-    delay = int(config["Settings"]["DELAY"]) 
+    delay = int(config["Settings"]["DELAY"])
+    delay_error = int(config["Settings"]["DELAY_ERROR"])
     threshold = float(config["Settings"].get("POWER_FAILURE_THRESHOLD", 0.5))
     
     ip_list = read_ip_file()
@@ -105,11 +138,10 @@ async def main():
     CHAT_ID = config["General"]["CHAT_ID"]
 
     tasks = [asyncio.create_task(pinger_worker(i[0], i[1], delay)) for i in ip_list]
-    # Передаємо той самий delay в монітор
-    tasks.append(asyncio.create_task(central_monitor(bot, CHAT_ID, threshold, delay)))
+    tasks.append(asyncio.create_task(central_monitor(bot, CHAT_ID, threshold, delay, delay_error)))
     
-    print(f"Моніторинг запущено (затримка: {delay} сек)!")
-    await sendmess(bot, CHAT_ID, "🚀 Моніторинг світла запущено!")
+    print(f"Моніторинг запущено! (затримка: {delay} сек, при помилці: {delay_error} сек)")
+    await sendmess(bot, CHAT_ID, "🚀 Моніторинг світла запущено!", delay_error)
     await asyncio.gather(*tasks)
 
 if __name__ == "__main__":
