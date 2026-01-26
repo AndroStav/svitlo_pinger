@@ -52,23 +52,27 @@ async def pinger_worker(ip, building, delay):
             ip_states[ip] = current_st
         await asyncio.sleep(delay)
 
-# Використовуємо delay для частоти перевірки стану будинків
-async def central_monitor(bot, CHAT_ID, threshold, delay):
-    # Даємо час на перший скан (3 цикли затримки, щоб дані були точними)
-    await asyncio.sleep(delay * 3)
-    # Стартове повідомлення зі статусами
-    start_message = "Статус світла на старті:"
+async def info_message(threshold):
+    time = datetime.now().strftime('%H:%M:%S')
+    message = f"Статус світла станом на {time}:"
     
     for building, status in buildings_status.items():
         fail_ratio = status["down"] / status["total"]
         if fail_ratio >= threshold:
                 status["alert_sent"] = True
-                start_message += f"\n⚠️ {building} без світла\n        (доступно {status['total'] - status['down']} з {status['total']})"
+                message += f"\n⚠️ {building} без світла\n        (доступно {status['total'] - status['down']} з {status['total']})"
             
         elif fail_ratio < threshold:
             status["alert_sent"] = False
-            start_message += f"\n💡 {building} зі світлом\n        (доступно {status['total'] - status['down']} з {status['total']})"
-    
+            message += f"\n💡 {building} зі світлом\n        (доступно {status['total'] - status['down']} з {status['total']})"
+    return message
+
+# Використовуємо delay для частоти перевірки стану будинків
+async def central_monitor(bot, CHAT_ID, threshold, delay):
+    # Даємо час на перший скан (3 цикли затримки, щоб дані були точними)
+    await asyncio.sleep(delay * 3)
+    # Стартове повідомлення зі статусами
+    start_message = await info_message(threshold)
     await sendmess(bot, CHAT_ID, start_message)
     
     while True:
