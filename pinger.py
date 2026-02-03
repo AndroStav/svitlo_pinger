@@ -80,7 +80,7 @@ async def info_message(threshold):
     return message
 
 async def central_monitor(bot, CHAT_ID, threshold, delay, delay_error):
-    await asyncio.sleep(delay * 3)
+    await asyncio.sleep(60)
     
     for building, status in buildings_status.items():
         status["alert_sent"] = (status["down"] / status["total"] >= threshold)
