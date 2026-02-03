@@ -66,7 +66,13 @@ async def info_message(threshold):
     message = f"📊 **МОНІТОР СВІТЛА**\nОновлено о: `{time}`\n"
     message += "—" * 15 + "\n"
     
-    for building, status in buildings_status.items():
+    # Сортуємо будинки: 
+    sorted_buildings = sorted(
+        buildings_status.items(),
+        key=lambda item: (item[1]["down"] / item[1]["total"] < threshold, item[0])
+    )
+    
+    for building, status in sorted_buildings:
         available = status["total"] - status["down"]
         fail_ratio = status["down"] / status["total"]
         perc = (available / status["total"]) * 100
