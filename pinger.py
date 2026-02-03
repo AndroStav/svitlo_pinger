@@ -109,7 +109,14 @@ def get_duration_str(last_change_iso):
     h_text = pluralize(hours, ["годину", "години", "годин"])
     m_text = pluralize(minutes, ["хвилину", "хвилини", "хвилин"])
     
-    return f"{days} {d_text} {hours} {h_text} {minutes} {m_text}"
+    if days > 0:
+        final_text = f"{days} {d_text} {hours} {h_text} {minutes} {m_text}"
+    elif hours > 0:
+        final_text = f"{hours} {h_text} {minutes} {m_text}"
+    else:
+        final_text = f"{minutes} {m_text}"
+    
+    return final_text
 
 async def info_message(threshold):
     time_now = datetime.now().strftime('%H:%M:%S')
@@ -131,7 +138,7 @@ async def info_message(threshold):
         duration_str = get_duration_str(status["last_change"])
         
         if fail_ratio >= threshold:
-            icon, status_text = "⚠️", "БЕЗ СВІТЛА"
+            icon, status_text = "⚠️", "без світла"
             time_label = "Немає вже"
         else:
             icon, status_text = "💡", "зі світлом"
@@ -179,8 +186,8 @@ async def central_monitor(bot, CHAT_ID, threshold, delay, delay_error):
                 changes_made = True
                 
                 msg = (f"⚠️ **Світло зникло**: {building}\n"
-                       f"🕑 {time_now_str}\n"
-                       f"⏳ Було зі світлом: `{duration}`")
+                       f"⏳ Було зі світлом: `{duration}`\n"
+                       f"🕑 {time_now_str}")
                 await sendmess(bot, CHAT_ID, msg, delay_error)
             
             # Світло З'ЯВИЛОСЯ
@@ -193,8 +200,8 @@ async def central_monitor(bot, CHAT_ID, threshold, delay, delay_error):
                 changes_made = True
                 
                 msg = (f"💡 **Світло з'явилося**: {building}\n"
-                       f"🕑 {time_now_str}\n"
-                       f"⏳ Було без світла: `{duration}`")
+                       f"⏳ Було без світла: `{duration}`\n"
+                       f"🕑 {time_now_str}\n")
                 await sendmess(bot, CHAT_ID, msg, delay_error)
         
         if changes_made:
