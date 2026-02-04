@@ -124,13 +124,15 @@ async def info_message(threshold):
     message += "—" * 15 + "\n"
     
     # Сортування
-    sorted_buildings = sorted(
-        buildings_status.items(),
-        key=lambda item: (
-            item[1]["down"] / item[1]["total"] < threshold, 
-            item[1]["last_change"]
-        )
-    )
+    def sorting_key(item):
+        status = item[1]
+        is_up = (status["down"] / status["total"]) < threshold
+        ts = datetime.fromisoformat(status["last_change"]).timestamp()
+        
+        # Використовуємо -ts, щоб найбільше число (зараз) стало найменшим і пішло вгору
+        return (1 if is_up else 0, -ts)
+    
+    sorted_buildings = sorted(buildings_status.items(), key=sorting_key)
     
     for building, status in sorted_buildings:
         available = status["total"] - status["down"]
