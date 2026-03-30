@@ -10,8 +10,13 @@ buildings_status = {}
 ip_states = {}
 
 def save_status():
-    # Зберігає час останньої зміни статусів у файл
-    data = {b: status["last_change"] for b, status in buildings_status.items()}
+    # Зберігає стан (наявність світла) та час останньої зміни у файл
+    data = {
+        b: {
+            "last_change": status["last_change"], 
+            "alert_sent": status["alert_sent"]
+        } for b, status in buildings_status.items()
+    }
     with open(STATUS_FILE, "w") as f:
         json.dump(data, f)
 
@@ -27,7 +32,7 @@ def load_status():
 
 def read_ip_file():
     ip_list = []
-    saved_times = load_status()
+    saved_status = load_status()
     current_now = datetime.now().isoformat()
     
     try:
@@ -38,11 +43,24 @@ def read_ip_file():
                     ip, building = row[0], row[1]
                     ip_list.append([ip, building])
                     if building not in buildings_status:
+                        b_saved = saved_status.get(building)
+                        
+                        # Читаємо новий формат (словник) або старий (рядок)
+                        if isinstance(b_saved, dict):
+                            last_change = b_saved.get("last_change", current_now)
+                            alert_sent = b_saved.get("alert_sent", False)
+                        elif isinstance(b_saved, str):
+                            last_change = b_saved
+                            alert_sent = False
+                        else:
+                            last_change = current_now
+                            alert_sent = False
+                            
                         buildings_status[building] = {
                             "total": 0, 
                             "down": 0, 
-                            "alert_sent": False,
-                            "last_change": saved_times.get(building, current_now) # Завантажуємо час або ставимо поточний
+                            "alert_sent": alert_sent, # Відновлюємо стан з файлу
+                            "last_change": last_change
                         }
                     buildings_status[building]["total"] += 1
                     ip_states[ip] = "up"
@@ -157,9 +175,6 @@ async def info_message(threshold):
 
 async def central_monitor(bot, CHAT_ID, threshold, delay, delay_error):
     await asyncio.sleep(60)
-    
-    for building, status in buildings_status.items():
-        status["alert_sent"] = (status["down"] / status["total"] >= threshold)
     
     # Створення закріпленого повідомлення з очікуванням мережі
     main_msg = None
