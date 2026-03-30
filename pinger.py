@@ -9,6 +9,9 @@ STATUS_FILE = "status.json"
 buildings_status = {}
 ip_states = {}
 
+server_has_internet = True
+internet_just_restored = False
+
 def save_status():
     # Зберігає стан (наявність світла) та час останньої зміни у файл
     data = {
@@ -68,6 +71,30 @@ def read_ip_file():
     except Exception as e:
         logging.error(f"Помилка CSV: {e}")
         return None
+    
+async def check_internet():
+    # Перевірка доступності зовнішньої мережі
+    if await ping('8.8.8.8') == 0: return True
+    return False
+
+async def internet_monitor_worker():
+    global server_has_internet, internet_just_restored
+    while True:
+        is_ok = await check_internet()
+        if is_ok and not server_has_internet:
+            # Інтернет з'явився після відсутності!
+            server_has_internet = True
+            internet_just_restored = True
+            logging.info(f"На сервері відновився інет.")
+            # Даємо 30 секунд пінгерам, щоб вони оновили справжні статуси
+            await asyncio.sleep(30)
+            internet_just_restored = False
+        elif not is_ok and server_has_internet:
+            # Інтернет пропав
+            server_has_internet = False
+            logging.warning(f"На сервері зник інет!")
+            
+        await asyncio.sleep(15) # Перевіряти наявність інету кожні 15 сек
 
 async def ping(host):
     timeout_sec = 1
@@ -94,6 +121,11 @@ async def sendmess(bot, CHAT_ID, message, delay_error):
 
 async def pinger_worker(ip, building, delay):
     while True:
+        # Якщо немає інтернету — заморожуємо статуси
+        if not server_has_internet:
+            await asyncio.sleep(delay)
+            continue
+        
         response = await ping(ip)
         current_st = "up" if response == 0 else "down"
         if current_st != ip_states[ip]:
@@ -189,6 +221,10 @@ async def central_monitor(bot, CHAT_ID, threshold, delay, delay_error):
 
     while True:
         await asyncio.sleep(delay)
+        # Блокуємо хибні сповіщення, якщо впав інтернет або щойно піднявся
+        if not server_has_internet or internet_just_restored:
+            continue
+        
         time_now_str = datetime.now().strftime('%H:%M:%S')
         current_iso = datetime.now().isoformat()
         
@@ -249,9 +285,14 @@ async def main():
     bot = telegram.Bot(config["General"]["TGTOKEN"])
     CHAT_ID = config["General"]["CHAT_ID"]
 
-    tasks = [asyncio.create_task(pinger_worker(i[0], i[1], delay)) for i in ip_list]
+    # Запускаємо фонову перевірку інтернету першою
+    tasks = [asyncio.create_task(internet_monitor_worker())]
+    
+    for i in ip_list:
+        tasks.append(asyncio.create_task(pinger_worker(i[0], i[1], delay)))
     tasks.append(asyncio.create_task(central_monitor(bot, CHAT_ID, threshold, delay, delay_error)))
     
+    logging.info(f"Моніторинг запущено! (затримка: {delay} сек, при помилці: {delay_error} сек)")
     print(f"Моніторинг запущено! (затримка: {delay} сек, при помилці: {delay_error} сек)")
     await sendmess(bot, CHAT_ID, "🚀 Моніторинг світла запущено!", delay_error)
     await asyncio.gather(*tasks)
