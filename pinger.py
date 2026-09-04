@@ -97,7 +97,7 @@ async def internet_monitor_worker():
         await asyncio.sleep(15) # Перевіряти наявність інету кожні 15 сек
 
 async def ping(host):
-    timeout_sec = 1
+    timeout_sec = 5
     command = ['ping', '-n' if os.name == 'nt' else '-c', '1', '-w' if os.name == 'nt' else '-W', str(int(timeout_sec * 1000) if os.name == 'nt' else timeout_sec), host]
     try:
         process = await asyncio.create_subprocess_exec(*command, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
@@ -176,7 +176,8 @@ async def info_message(threshold):
     # Сортування
     def sorting_key(item):
         status = item[1]
-        is_up = (status["down"] / status["total"]) < threshold
+        # Визначаємо "up" на основі глобального прапорця alert_sent
+        is_up = not status.get("alert_sent", False)
         ts = datetime.fromisoformat(status["last_change"]).timestamp()
         
         # Використовуємо -ts, щоб найбільше число (зараз) стало найменшим і пішло вгору
@@ -192,7 +193,8 @@ async def info_message(threshold):
         # Використовуємо нашу функцію
         duration_str = get_duration_str(status["last_change"])
         
-        if fail_ratio >= threshold:
+        # Використовуємо глобальний статус `alert_sent` замість локального вимірювання
+        if status.get("alert_sent", False):
             icon, status_text = "⚠️", "без світла"
             time_label = "Немає вже"
         else:
